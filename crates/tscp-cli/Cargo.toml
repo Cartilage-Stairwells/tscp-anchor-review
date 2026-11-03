@@ -1,0 +1,10 @@
+[package]
+name = "tscp-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tscp-kernel = { path = "../tscp-kernel" }
+ciborium = "0.2"
+hex = "0.4"
+anyhow = "1.0.103"

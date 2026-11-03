@@ -1,0 +1,32 @@
+{
+  "name": "tscp-anchor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "verify:offline": "node scripts/verify-receipt.mjs anchor-receipts/*.json",
+    "verify:rpc:sepolia": "node scripts/verify-receipt.mjs anchor-receipts/*-sepolia-anchor.json --rpc=$SEPOLIA_RPC_URL",
+    "audit:offline": "node scripts/audit-receipts.mjs offline",
+    "audit:sepolia": "node scripts/audit-receipts.mjs sepolia",
+    "audit:manifest": "node scripts/create-audit-manifest.mjs anchor-receipts/*.json --out=audit-manifest.json --auditor=Triune-Oracle",
+    "verify:audit:manifest": "node scripts/verify-audit-manifest.mjs audit-manifest.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "chai": "^4.5.0",
+    "ethers": "^6.17.0",
+    "hardhat": "^2.28.6",
+    "solc": "^0.8.24"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "zod": "^4.3.6"
+  }
+}

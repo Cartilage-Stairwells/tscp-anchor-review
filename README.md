@@ -1,0 +1,310 @@
+## Release A — formally verified NTT over BabyBear (2026-10-16)
+
+**The result:** an exact round-trip identity for the full NTT construct — the inverse
+transform composed with the forward transform is the identity, with the inverse built
+from `dif_butterfly_inv` in LIFO order (no external N^-1 factor) — machine-checked in
+Lean 4 under the pinned toolchain and kernel-audited: **101 theorems, zero project
+axioms, zero `sorryAx`** across 11 build roots (CI attestation run 38300810290 on this
+commit). See **[CLAIMS_STATEMENT.md](CLAIMS_STATEMENT.md)** for the full evidence
+binding and claim boundaries — what is proven, what is SMT-verified at the kernel level,
+what is differential test evidence on silicon, what is explicitly NOT claimed (no
+universal implementation equivalence, no `Core.ntt_map` correspondence, no performance
+claim beyond host-named sealed numbers), and the sealed host-named kernel-throughput
+comparison vs Plonky3 (claim C4, Rev 2 2026-10-18).
+
+**Companion implementation:** `avx512-butterfly` ([access restricted](#reviewer-access); public evidence at [avx512-butterfly-evidence](https://github.com/Cartilage-Stairwells/avx512-butterfly-evidence)) —
+AVX-512 engines with CI-enforced bit-exact parity against the scalar reference on native
+silicon.
+
+---
+
+# tscp-anchor
+
+The **Triune Structured Codex Protocol (TSCP)** is a multi-agent coordination standard that governs state transitions, governance events, and oracle-layer operations across a sovereign AI execution environment. **TSCP Anchor** is its cryptographic proving layer — the component responsible for making every protocol claim independently verifiable.
+
+It implements a zero-knowledge proving stack built on [Plonky3](https://github.com/Plonky3/Plonky3), providing integrity guarantees grounded in cryptographic proof rather than trust in any single party or system.
+
+The system is designed around a principle of *sovereign verifiability*: every claim the protocol makes about its own state can be independently verified by any party with access to the proof and the public parameters, without trusting the prover.
+
+TSCP Anchor is the public verification and documentation layer for the zkSHA-Rx Fly validation effort. Implementation artifacts supporting technical review are maintained in a separate access-controlled repository.
+
+
+---
+
+## What This Is
+
+tscp-anchor provides three things:
+
+1. **A ZK proving stack** — FRI (Fast Reed-Solomon IOP)-based transparent commitment scheme designed for STARK-style proof systems, sumcheck protocol, DEEP-ALI (Domain Extension for Eliminating Pretenders via Algebraic Linking Identity) constraint verification, and Poseidon2-based Fiat-Shamir transcript, all implemented in Rust on top of Plonky3 0.6.1.
+
+2. **An on-chain anchor** — `TSCPAnchor.sol`, an immutable Solidity registry that records keccak256 hashes of TSCP artifacts on-chain. Deployed on Sepolia at `0x6FDB70F31E4815bE866Fd6aDD32802f90F9B5E06`.
+
+3. **A migration protocol** — a versioned upgrade framework (`ProofEnvelope`, `upgrade_driver.sh`) that governs transitions between Plonky3 versions with golden corpus validation, mixed-version rejection gates, and rollback manifests.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   prover-server                     │
+│  HTTP endpoint (/prove/sumcheck)                    │
+│  Sumcheck prover + verifier                         │
+│  ProofEnvelope versioning                           │
+└────────────────────┬────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────┐
+│                  oracle-layer                       │
+│  FRI commit / query / verify                        │
+│  DEEP-ALI constraint checking                       │
+│  Multilinear oracle (MleOracle trait)               │
+│  Poseidon2 Fiat-Shamir transcript                   │
+└────────────────────┬────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────┐
+│                 batch-merkle                        │
+│  Plonky3 BatchMerkle primitives                     │
+│  Tamper-evident commitment layer                    │
+└────────────────────┬────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────┐
+│                  commitment                         │
+│  TSCP PCS (polynomial commitment scheme)            │
+│  Wires DFT + MMCS + FRI params                     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Supporting systems:**
+
+- **OWSL** (Oracle Witness Status Layer) — operational witness-status daemon used for runtime health gating and execution policy. Writes atomic status to `~/.tscp/owsl_status.json` every 30 seconds. Rust bridge in `crates/prover-server/src/owsl_bridge.rs`.
+- **TSCPAnchor.sol** — Solidity contract for on-chain artifact registration.
+- **Lean 4 kernel** (`TraceCoreProver.lean`) — formal semantics layer defining the Mazurkiewicz trace monoid and categorical compiler functor that underpin the protocol's theoretical guarantees.
+
+---
+
+## Soundness Properties
+
+The proving stack enforces the following soundness invariants, each covered by adversarial tests:
+
+| Property | Location | Test |
+|---|---|---|
+| FRI query: tampered folded value rejected | `oracle-layer` | `tampered_folded_value_fails_verification` |
+| FRI query: wrong beta rejected | `oracle-layer` | `wrong_beta_fails_verification` |
+| FRI query: forged opening rejected | `oracle-layer` | `forged_opening_with_wrong_root_fails_even_with_correct_arithmetic` |
+| Sumcheck: wrong claimed sum rejected | `prover-server` | `wrong_claimed_sum_fails_verification` |
+| Sumcheck: tampered round message rejected | `prover-server` | `tampered_round_message_fails_verification` |
+| Sumcheck: final-binding gap closed | `prover-server` | `honest_proof_verifies` |
+| DEEP-ALI: real trace enforced | `oracle-layer` | `oracle_lift_end_to_end` |
+| BatchMerkle: tampered leaf rejected | `batch-merkle` | `tampered_proof_fails_verification` |
+| Version gate: 0.6.2 envelope rejected by 0.6.1 verifier | `prover-server` | `test_062_rejected_by_061_verifier` |
+
+---
+
+## Current State
+
+**Baseline:** `tscp-freeze-0.6.1` (tag)
+
+The repository is frozen at Plonky3 0.6.1 pending availability of 0.6.2 on crates.io. All currently identified implementation soundness issues covered by the test suite have been addressed. The test suite passes cleanly with zero test failures.
+
+```
+cargo test --workspace
+# 44 tests, 0 failures
+```
+
+**Migration trigger:** When Plonky3 0.6.2 ships, the upgrade sequence is:
+
+```bash
+git status && git tag -n && cargo test --workspace  # confirm baseline
+# then begin migration on master via upgrade_driver.sh
+```
+
+Golden corpus artifacts for 0.6.1 are archived in `corpus/golden-0.6.1/` with SHA256 checksums under tag `golden-corpus-0.6.1`.
+
+---
+
+## Crate Structure
+
+| Crate | Purpose |
+|---|---|
+| `oracle-layer` | FRI, DEEP-ALI, MLE oracle, Fiat-Shamir transcript |
+| `batch-merkle` | Plonky3 BatchMerkle wrapper |
+| `commitment` | TSCP polynomial commitment scheme |
+| `prover-server` | HTTP proving service, sumcheck, ProofEnvelope |
+
+---
+
+## Build Environment
+
+Validated build environment:
+
+```
+rustc 1.96.0 (ac68faa20 2026-05-25)
+cargo 1.96.0 (30a34c682 2026-05-25)
+```
+
+```bash
+cargo test --workspace  # 44 tests, 0 failures
+```
+
+---
+
+## Running the Prover Server
+
+```bash
+cd crates/prover-server
+cargo run --release
+# Listening on 127.0.0.1:3030
+
+# Submit a sumcheck proof request:
+curl -X POST http://localhost:3030/prove/sumcheck \
+  -H "Content-Type: application/json" \
+  -d '{"job_id": "test-1", "col0": [1,2,3,4], "col1": [5,6,7,8], "alpha": 42}'
+```
+
+---
+
+## On-Chain Deployment
+
+`TSCPAnchor.sol` is deployed on Sepolia testnet:
+
+```
+Address: 0x6FDB70F31E4815bE866Fd6aDD32802f90F9B5E06
+Network: Sepolia
+```
+
+Verifiable independently via any Sepolia block explorer. This is a development deployment; mainnet hardening and external audit are prerequisites for production use.
+
+Anchor payload digests (keccak-256, from `manifest.json`):
+```
+data.json: 0x41a7960e6f0b4d241b79320d4a736d24bc31fca8296701a88b92e0dc6749eb78
+gov.json:  0x126b44d63d4a28eae731398e1890954cddf3a6e2bf3ce7fc456c7a520ec1927a
+```
+
+(Corrected 2026-09-07, finding EXC-016: these values were previously mislabeled as "deployment transaction hashes." They are keccak-256 digests of the payload files as recorded in `manifest.json` and are reproducible byte-exactly from those files; they are not Sepolia transaction hashes. The on-chain deployment is independently verifiable via the contract address above.)
+
+---
+
+## OWSL Daemon
+
+The Oracle Witness Status Layer is an operational health-gating component. It monitors configured runtime conditions and gates verification workflows accordingly.
+
+```bash
+# Bootstrap (write initial status):
+python3 src/owsl_ipc.py test
+
+# Check current status:
+python3 src/owsl_ipc.py status
+
+# Run as daemon (termux-services):
+# Service installed at $SVDIR/owsl
+sv status owsl
+```
+
+Status is written atomically to `~/.tscp/owsl_status.json`. The Rust bridge (`crates/prover-server/src/owsl_bridge.rs`) enforces configured execution policy based on the current status.
+
+---
+
+## Migration Protocol
+
+Version transitions are governed by a three-phase protocol:
+
+- **Phase A** — Archive golden corpus for the current version, compute SHA256 checksums, tag.
+- **Phase B** — Add versioned `ProofEnvelope`, implement mixed-version rejection gate, test.
+- **Phase C** — Run `upgrade_driver.sh` against the new version, validate benchmarks, retag.
+
+Rollback manifests for the 0.6.1 → 0.6.2 transition are in `migration-backups/plonky3-0.6.2-preflight/`.
+
+---
+
+## Security & Audit Status
+
+An external cryptographic audit has not been performed. The soundness properties listed above are covered by adversarial tests within the repository but have not been independently verified by a third party.
+
+Scope of current security coverage:
+- Implementation-level soundness: verified via test suite
+- Protocol-level soundness: not formally proven
+- Build environment: not independently reproduced
+- Operational security (key management, deployment hardening): not reviewed
+
+This repository is suitable for research evaluation, technical due diligence, and collaborator review. It is not suitable for production deployment without independent audit and operational hardening.
+
+---
+
+## Current Limitations
+
+- Plonky3 version is pinned to 0.6.1 pending validated migration to 0.6.2.
+- External cryptographic audit has not been performed.
+- Sepolia deployment is for development verification only.
+- Production deployment requires independent review and operational hardening.
+
+---
+
+## Status
+
+| Component | Status |
+|---|---|
+| FRI prove/verify | Complete |
+| Sumcheck (full soundness) | Complete |
+| DEEP-ALI | Complete |
+| Poseidon2 Fiat-Shamir | Complete |
+| BatchMerkle | Complete (using Plonky3 primitives) |
+| OWSL daemon | Running |
+| On-chain anchor (Sepolia) | Deployed |
+| External audit | Not yet performed |
+| Mainnet deployment | Pending audit |
+
+---
+
+## Related
+
+- [TSCP Specification](tscp-docs/) — protocol governance documents
+- [Lean 4 kernel](TraceCoreProver.lean) — formal semantics
+- [Triune-Oracle](https://github.com/Triune-Oracle) — parent organization
+- `tscp-pl-phase1` — frozen Phase 1 AVX-512 research artifact ([access restricted](#reviewer-access))
+- `avx512-butterfly` — AVX-512 BabyBear NTT kernel benchmark artifact (access restricted; contact for access)
+- [PROJECT_FACTS.md](PROJECT_FACTS.md) — verified project facts, evidence boundaries, and reviewer reference
+
+---
+
+## Reviewer Access
+
+The `avx512-butterfly` repository (implementation, benchmarks, evidence) is access-restricted. To request review access:
+
+1. **Email** `adamantinespine@gmail.com` with subject line:
+   - `Review Access Request — zkSHA-Rx Fly` (for technical review)
+   - `Grant Review — zkSHA-Rx Fly` (for grant/funding evaluation)
+   - `Interop Inquiry — zkSHA-Rx Fly` (for interoperability assessment)
+
+   Include:
+   - Your name and affiliation (or "independent")
+   - Your area of expertise
+   - Purpose of the review
+
+2. **You will receive:**
+   - Read access to the restricted repository at a specified commit/tag
+   - Reviewer packet describing artifact scope and boundaries
+   - PROJECT_FACTS.md as the canonical claim reference
+
+3. **Review target:**
+   - `tscp-anchor`: current `master`
+   - `tscp-pl-phase1`: `phase1-freeze`
+   - `avx512-butterfly`: specific commit/tag provided upon access approval
+
+4. **Review scope does not require validation of:**
+   - The entire project
+   - End-to-end prover performance
+   - Production deployment readiness
+
+See PROJECT_FACTS.md — Frozen Claims Table for full claim boundaries.
+
+
+
+Current cross-repository evidence map: [TSCP Evidence Index](docs/TSCP_EVIDENCE_INDEX_2026-10-21.md).
+
+## License
+
+Copyright 2026 Sean Christopher Southwick.
+
+This repository is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+Public visibility and the license do not broaden the evidence claims beyond the documented scope (see [TSCP Evidence Index](docs/TSCP_EVIDENCE_INDEX_2026-10-21.md)). Private correspondence, credentials, operational material, and out-of-repository work remain outside this repository and outside this license statement.
