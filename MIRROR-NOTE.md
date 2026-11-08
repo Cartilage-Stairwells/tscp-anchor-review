@@ -11,6 +11,16 @@ and no history.
 - **Start here:** `README.md`, then `CLAIMS_STATEMENT.md`
 - **If the two differ, the canonical repo governs.** Nothing here supersedes it.
 
+## Name change after the pin (2026-11-02)
+
+The canonical repo now expands TSCP as **Trusted Supply Chain Protocol**; the Triune
+expansion was retired by lexicon Decision 2026-11-02, and both `tscp.store` and the
+canonical README use the new name. This snapshot is pinned at `c6649916` (2026-10-29) and
+therefore still carries the older expansion in `README.md` and under `docs/paper/`. That
+text is the record of the pinned tree, not a current statement about the project, and this
+note does not rewrite it: history is recorded, not retrofitted. The canonical repo governs.
+Regenerating this snapshot from a later canonical commit is what brings the name forward here.
+
 ## What is in here
 
 **Every file in the canonical tree at that commit is present here, byte for byte:
