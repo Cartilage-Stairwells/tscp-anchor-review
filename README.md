@@ -20,7 +20,7 @@ silicon.
 
 # tscp-anchor
 
-The **Triune Structured Codex Protocol (TSCP)** is a multi-agent coordination standard that governs state transitions, governance events, and oracle-layer operations across a sovereign AI execution environment. **TSCP Anchor** is its cryptographic proving layer — the component responsible for making every protocol claim independently verifiable.
+The **Trusted Supply Chain Protocol (TSCP)** is a multi-agent coordination standard that governs state transitions, governance events, and oracle-layer operations across a sovereign AI execution environment. **TSCP Anchor** is its cryptographic proving layer — the component responsible for making every protocol claim independently verifiable.
 
 It implements a zero-knowledge proving stack built on [Plonky3](https://github.com/Plonky3/Plonky3), providing integrity guarantees grounded in cryptographic proof rather than trust in any single party or system.
 
